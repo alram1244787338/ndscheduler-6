@@ -1,17 +1,37 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-builds-*
-.cache/
-.pip/
-.venv/
-.wheelhouse/
-.eggs/
-.idea/
-build/
-dist/
-*.db
+*.so
 *.egg-info/
-*.egg/
+*.egg
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+*.whl
+
+# Go
+vendor/
+go.sum
+
+# Node / npm
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
