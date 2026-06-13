@@ -1,7 +1,11 @@
 /**
  * logs-table view.
  *
+ * Extends BaseTableView with logs-specific row building and
+ * collection refresh behaviour.
+ *
  * @author wenbin@nextdoor.com
+ * @refactor uses base-table-view for shared DataTable lifecycle
  */
 
 require.config({
@@ -12,7 +16,8 @@ require.config({
     'bootstrap': 'vendor/bootstrap',
     'datatables': 'vendor/jquery.dataTables',
 
-    'utils': 'utils'
+    'utils': 'utils',
+    'base-table-view': 'views/base-table-view'
   },
 
   shim: {
@@ -33,51 +38,38 @@ require.config({
 });
 
 define(['utils',
+        'base-table-view',
         'backbone',
         'bootstrap',
-        'datatables'], function(utils) {
-
+        'datatables'], function(utils, BaseTableView) {
   'use strict';
 
-  return Backbone.View.extend({
+  return BaseTableView.extend({
 
-    initialize: function() {
-      this.listenTo(this.collection, 'sync', this.render);
-      this.listenTo(this.collection, 'request', this.requestRender);
-      this.listenTo(this.collection, 'reset', this.resetRender);
+    tableId: 'logs-table',
+    spinnerId: 'logs-spinner',
 
-      // Initialize data table
-      this.table = $('#logs-table').dataTable({
-        // Sorted by job name
-        'order': [[3, 'desc']]
-      });
+    /**
+     * DataTable options -- sorted by time descending.
+     */
+    dataTableOptions: function() {
+      return { 'order': [[3, 'desc']] };
     },
 
     /**
-     * Event handler for starting to make network request.
+     * Re-fetch the logs collection (used by the base reset / refresh flow).
      */
-    requestRender: function() {
-      this.table.fnClearTable();
-      this.spinner = utils.startSpinner('logs-spinner');
-    },
-
-    /**
-     * Event handler for resetting logs data.
-     */
-    resetRender: function() {
-      // It'll trigger sync event
+    refreshCollection: function() {
       this.collection.getLogs();
     },
 
     /**
-     * Event handler for finishing fetching jobs data.
+     * Build row data array from the logs collection.
      */
-    render: function() {
+    buildRows: function() {
       var logs = this.collection.logs;
-
       var data = [];
 
-      // Build up data to pass to data tables
       _.each(logs, function(log) {
         var logObj = log.toJSON();
         data.push([
@@ -89,12 +81,7 @@ define(['utils',
         ]);
       });
 
-      if (data.length) {
-        this.table.fnAddData(data);
-      }
-
-      // Stop the spinner
-      this.spinner.stop();
+      return data;
     }
   });
 });

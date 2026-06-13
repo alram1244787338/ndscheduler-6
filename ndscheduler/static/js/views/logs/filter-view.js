@@ -1,7 +1,11 @@
 /**
  * logs-filter view.
  *
+ * Extends BaseFilterView with logs-specific selectors and
+ * collection method.
+ *
  * @author wenbin@nextdoor.com
+ * @refactor uses base-filter-view for shared filter lifecycle
  */
 
 require.config({
@@ -10,7 +14,9 @@ require.config({
     'underscore': 'vendor/underscore',
     'backbone': 'vendor/backbone',
     'bootstrap': 'vendor/bootstrap',
-    'moment': 'vendor/moment'
+    'moment': 'vendor/moment',
+
+    'base-filter-view': 'views/base-filter-view'
   },
 
   shim: {
@@ -24,22 +30,15 @@ require.config({
   }
 });
 
-define(['backbone', 'bootstrap', 'moment'], function(backbone, bootstrap, moment) {
+define(['backbone',
+        'bootstrap',
+        'moment',
+        'base-filter-view'], function(backbone, bootstrap, moment, BaseFilterView) {
   'use strict';
 
-  return Backbone.View.extend({
-    initialize: function() {
-      $('#logs-filter-button').on('click', _.bind(this.filterTable, this));
-    },
-
-    filterTable: function(e) {
-      e.preventDefault();
-
-      var range = parseInt($('#logs-filter-time-range').val(), 10);
-      var end = moment();
-      var start = moment().subtract(range, 'second');
-      this.collection.getLogsByRange(start.toISOString(),
-          end.toISOString());
-    }
+  return BaseFilterView.extend({
+    filterButtonId: 'logs-filter-button',
+    timeRangeId: 'logs-filter-time-range',
+    collectionMethod: 'getLogsByRange'
   });
 });

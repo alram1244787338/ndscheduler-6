@@ -10,6 +10,9 @@ require.config({
     'executions-view': 'views/executions/executions-view',
     'logs-view': 'views/logs/logs-view',
 
+    'base-table-view': 'views/base-table-view',
+    'base-filter-view': 'views/base-filter-view',
+
     'jobs-collection': 'models/jobs',
     'executions-collection': 'models/executions',
     'logs-collection': 'models/logs'

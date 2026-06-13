@@ -21,6 +21,15 @@ test:
 	# Hacky way to ensure mock is installed before running setup.py
 	$(SOURCE_VENV) && pip install mock==1.1.2 && $(PYTHON) setup.py test
 
+# Front-end safety-net tests for the shared list-view layer (base-table-view /
+# base-filter-view). Runs in Node with jsdom and is intentionally kept out of
+# the `test` target so the Python CI pipeline is unaffected. Installs the JS
+# dev dependencies only when they are missing, so it also works offline once
+# they are present.
+test-js:
+	@if [ ! -d node_modules/jsdom ]; then npm install; fi
+	node ndscheduler/static/js/tests/test-runner.js
+
 install:
 	make init
 	$(SOURCE_VENV) && $(PYTHON) setup.py install

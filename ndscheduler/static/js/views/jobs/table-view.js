@@ -1,7 +1,11 @@
 /**
  * jobs-table view.
  *
+ * Extends BaseTableView with jobs-specific row templates,
+ * run/edit sub-views, and refresh/timezone controls.
+ *
  * @author wenbin@nextdoor.com
+ * @refactor uses base-table-view for shared DataTable lifecycle
  */
 
 require.config({
@@ -13,6 +17,7 @@ require.config({
     'datatables': 'vendor/jquery.dataTables',
 
     'utils': 'utils',
+    'base-table-view': 'views/base-table-view',
     'run-job-view': 'views/jobs/run-job-view',
     'edit-job-view': 'views/jobs/edit-job-view',
 
@@ -39,6 +44,7 @@ require.config({
 });
 
 define(['utils',
+        'base-table-view',
         'run-job-view',
         'edit-job-view',
         'text!job-row-name',
@@ -46,74 +52,48 @@ define(['utils',
         'backbone',
         'bootstrap',
         'datatables'], function(utils,
+                                BaseTableView,
                                 RunJobView,
                                 EditJobView,
                                 JobRowNameHtml,
                                 JobRowActionHtml) {
   'use strict';
 
-  return Backbone.View.extend({
+  return BaseTableView.extend({
 
-    initialize: function() {
-      this.listenTo(this.collection, 'sync', this.render);
-      this.listenTo(this.collection, 'request', this.requestRender);
-      this.listenTo(this.collection, 'reset', this.resetRender);
-      this.listenTo(this.collection, 'error', this.requestError);
+    tableId: 'jobs-table',
+    spinnerId: 'jobs-spinner',
 
-      $('#jobs-refresh-button').on('click', _.bind(this.resetRender, this));
-      $('#display-tz').on('change', _.bind(this.resetRender, this));
-
-      // Initialize data table
-      this.table = $('#jobs-table').dataTable({
-        // Sorted by job name
-        'order': [[0, 'asc']]
-      });
+    /**
+     * DataTable options -- sorted by job name ascending.
+     */
+    dataTableOptions: function() {
+      return { 'order': [[0, 'asc']] };
     },
 
     /**
-     * Request error handler.
-     *
-     * @param {object} model
-     * @param {object} response
-     * @param {object} options
+     * Bind refresh button and timezone dropdown using safeBind
+     * to prevent duplicate handlers on re-initialisation.
      */
-    requestError: function(model, response, options) {
-      this.spinner.stop();
-      utils.alertError('Request failed: ' + response.responseText);
+    _bindDOMEvents: function() {
+      this.safeBind('#jobs-refresh-button', 'click', this.resetRender);
+      this.safeBind('#display-tz', 'change', this.resetRender);
     },
 
     /**
-     * Event handler for starting to make network request.
+     * Re-fetch the jobs collection (used by the base reset / refresh flow).
      */
-    requestRender: function() {
-      this.table.fnClearTable();
-      this.spinner = utils.startSpinner('jobs-spinner');
-    },
-
-    /**
-     * Event handler for resetting jobs data.
-     *
-     * This is registered with click handlers for the #jobs-refresh-button, the #display-tz
-     * dropdown, as well as this collection.  When called from the collection, no parameter
-     * is given.
-     */
-    resetRender: function(e) {
-      // It'll trigger sync event
-      if (e) {
-        e.preventDefault();
-      }
+    refreshCollection: function() {
       this.collection.getJobs();
     },
 
     /**
-     * Event handler for finishing fetching jobs data.
+     * Build row data array for DataTable from the jobs collection.
      */
-    render: function() {
+    buildRows: function() {
       var jobs = this.collection.jobs;
-
       var data = [];
 
-      // Build up data to pass to data tables
       _.each(jobs, function(job) {
         var jobObj = job.toJSON();
         data.push([
@@ -142,24 +122,20 @@ define(['utils',
         ]);
       });
 
-      if (data.length) {
-        this.table.fnClearTable();
-        this.table.fnAddData(data);
-      }
+      return data;
+    },
 
-      // Stop the spinner
-      this.spinner.stop();
-
-      // Set up the RunJob thing
+    /**
+     * After table is rendered, set up RunJob and EditJob sub-views.
+     */
+    afterRender: function() {
       new RunJobView({
         collection: this.collection
       });
 
-      // Set up EditJob thing
       new EditJobView({
         collection: this.collection
       });
-
     }
   });
 });

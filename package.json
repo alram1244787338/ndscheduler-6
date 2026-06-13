@@ -1,0 +1,24 @@
+{
+  "name": "work-1",
+  "version": "1.0.0",
+  "description": "![Apache](https://img.shields.io/hexpm/l/plug.svg)  [![Build Status](https://travis-ci.org/Nextdoor/ndscheduler.svg)](https://travis-ci.org/Nextdoor/ndscheduler)",
+  "main": "index.js",
+  "scripts": {
+    "test": "node ndscheduler/static/js/tests/test-runner.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alram1244787338/ndscheduler-6.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/alram1244787338/ndscheduler-6/issues"
+  },
+  "homepage": "https://github.com/alram1244787338/ndscheduler-6#readme",
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

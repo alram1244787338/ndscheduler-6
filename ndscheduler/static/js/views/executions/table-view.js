@@ -1,7 +1,11 @@
 /**
  * executions-table view.
  *
+ * Extends BaseTableView with executions-specific row building,
+ * result modal popup, and column configuration.
+ *
  * @author wenbin@nextdoor.com
+ * @refactor uses base-table-view for shared DataTable lifecycle
  */
 
 require.config({
@@ -13,6 +17,7 @@ require.config({
     'datatables': 'vendor/jquery.dataTables',
 
     'utils': 'utils',
+    'base-table-view': 'views/base-table-view',
     'text': 'vendor/text',
     'execution-result': 'templates/execution-result.html'
   },
@@ -35,74 +40,68 @@ require.config({
 });
 
 define(['utils',
+        'base-table-view',
         'text!execution-result',
         'backbone',
         'bootstrap',
-        'datatables'], function(utils, ExecutionResultHtml) {
+        'datatables'], function(utils, BaseTableView, ExecutionResultHtml) {
   'use strict';
 
-  return Backbone.View.extend({
-    initialize: function() {
+  return BaseTableView.extend({
+
+    tableId: 'executions-table',
+    spinnerId: 'executions-spinner',
+
+    /**
+     * DataTable options -- sorted by last updated time descending,
+     * result column is not orderable.
+     */
+    dataTableOptions: function() {
+      return {
+        'order': [[3, 'desc']],
+        'columnDefs': [
+          { 'orderable': false, 'className': 'table-result-column', 'targets': 5 }
+        ]
+      };
+    },
+
+    /**
+     * Append the result modal template and wire up show-result button
+     * handlers on each DataTable draw event.
+     */
+    _bindDOMEvents: function() {
       $('body').append(ExecutionResultHtml);
 
-      this.listenTo(this.collection, 'sync', this.render);
-      this.listenTo(this.collection, 'request', this.requestRender);
-      this.listenTo(this.collection, 'error', this.requestError);
+      var $table = $('#executions-table');
 
-      this.table = $('#executions-table').dataTable({
-        // Sorted by last updated time
-        'order': [[3, 'desc']],
-        // Disable sorting on result column
-        "columnDefs": [
-          { "orderable": false, "className": "table-result-column", "targets": 5 }
-        ]
-      });
-      
-      $('#executions-table').on('draw.dt', function () {
+      // Remove any previous draw.dt handler to avoid duplicates
+      $table.off('draw.dt').on('draw.dt', function() {
         var buttons = $('[data-action=show-result]');
         _.each(buttons, function(btn) {
-          $(btn).on('click', _.bind(function(e) {
+          $(btn).off('click').on('click', function(e) {
             e.preventDefault();
             $('#result-box').text(decodeURI($(btn).data('content')));
             $('#execution-result-modal').modal();
-          }, this));
+          });
 
-          // If there's a query parameter result, we'll display the result.
+          // If there is a query parameter result, display the result.
           if (!_.isUndefined(utils.getParameterByName('result'))) {
-            $('#result-box').text(executions[0].get('result'));
-            $('#execution-result-modal').modal();
+            if (typeof executions !== 'undefined' && executions[0]) {
+              $('#result-box').text(executions[0].get('result'));
+              $('#execution-result-modal').modal();
+            }
           }
         });
       });
     },
 
     /**
-     * Request error handler.
-     *
-     * @param {object} model
-     * @param {object} response
-     * @param {object} options
+     * Build row data array from the executions collection.
      */
-    requestError: function(model, response, options) {
-      this.spinner.stop();
-      utils.alertError('Request failed: ' + response.responseText);
-    },
-
-    /**
-     * Event handler for starting to send network request.
-     */
-    requestRender: function() {
-      this.table.fnClearTable();
-      this.spinner = utils.startSpinner('executions-spinner');
-    },
-
-    /**
-     * Event handler for finishing fetching execution data.
-     */
-    render: function() {
+    buildRows: function() {
       var executions = this.collection.executions;
-
       var data = [];
+
       _.each(executions, function(execution) {
         data.push([
           execution.getNameHTMLString(),
@@ -114,12 +113,7 @@ define(['utils',
         ]);
       });
 
-      if (data.length) {
-        this.table.fnClearTable();
-        this.table.fnAddData(data);
-      }
-
-      utils.stopSpinner(this.spinner);
+      return data;
     }
   });
 });
