@@ -1,5 +1,6 @@
 # REST APIs
 
+  * [Architecture](#architecture)
   * [Run it NOW](#run-it-now)
   * [REST APIs](#rest-apis)
     * [Jobs](#jobs)
@@ -16,6 +17,41 @@
       * [Run a job](#run-a-job)
     * [Audit logs](#audit-logs)
       * [Get logs within time range](#get-logs-within-time-range)
+
+## Architecture
+
+```
+handlers/
+├── base.py              # BaseHandler: JSON parsing, async dispatch
+│                        #   (respond_async), JSON error handling,
+│                        #   time-range args, record_audit_log
+├── job_helpers.py       # Pure functions: build_job_dict, validate_job_payload,
+│                        #   generate_modify_description, get_job_or_404
+├── jobs.py              # /api/v1/jobs endpoints (uses base + job_helpers)
+├── executions.py        # /api/v1/executions endpoints (uses base)
+├── audit_logs.py        # /api/v1/logs endpoints (uses base)
+├── index.py             # SPA web UI
+├── jobs_test.py         # Integration tests for jobs endpoints
+├── executions_test.py   # Integration tests for executions endpoints
+└── job_helpers_test.py  # Unit tests for job_helpers (pure functions)
+```
+
+### Key patterns
+
+- **Blocking boundary**: every DB/scheduler call lives in a private `_*`
+  method that returns the response body. `BaseHandler.respond_async`
+  dispatches it to the thread pool (or runs it inline for `?sync=...`
+  requests) and finishes the response, turning any failure into a proper
+  error instead of an unhandled exception raised after the handler returned.
+  The HTTP verb handlers (`get`, `post`, …) only orchestrate.
+- **Unified errors**: `BaseHandler.write_error` always returns JSON
+  `{"error": "..."}` — never HTML — so the front-end can rely on the shape.
+  A missing job/execution comes back as `400` with that same shape.
+- **Best-effort audit logs**: `record_audit_log` injects the current user and
+  logs (rather than raises) any DB failure, so a broken audit write never
+  turns a successful mutation into a user-facing error.
+- **Shared time-range parsing**: `get_time_range_args()` lives in base and
+  is used by both `executions.py` and `audit_logs.py`.
 
 ## Run it NOW
 ```bash

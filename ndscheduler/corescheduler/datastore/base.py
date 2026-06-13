@@ -79,7 +79,8 @@ class DatastoreBase(sched_sqlalchemy.SQLAlchemyJobStore):
         }
         execution.update(kwargs)
         execution_insert = self.executions_table.insert().values(**execution)
-        self.engine.execute(execution_insert)
+        with self.engine.begin() as conn:
+            conn.execute(execution_insert)
 
     def get_execution(self, execution_id):
         """Returns execution dict.
@@ -88,10 +89,10 @@ class DatastoreBase(sched_sqlalchemy.SQLAlchemyJobStore):
         :rtype: dict
         """
         selectable = select('*').where(self.executions_table.c.eid == execution_id)
-        rows = self.engine.execute(selectable)
-
-        for row in rows:
-            return self._build_execution(row)
+        with self.engine.connect() as conn:
+            rows = conn.execute(selectable)
+            for row in rows:
+                return self._build_execution(row)
 
     def update_execution(self, execution_id, **kwargs):
         """Update execution in database.
@@ -100,7 +101,8 @@ class DatastoreBase(sched_sqlalchemy.SQLAlchemyJobStore):
         """
         execution_update = self.executions_table.update().where(
             self.executions_table.c.eid == execution_id).values(**kwargs)
-        self.engine.execute(execution_update)
+        with self.engine.begin() as conn:
+            conn.execute(execution_update)
 
     def _build_execution(self, row):
         """Return job execution info from a row of scheduler_execution table.
@@ -155,12 +157,11 @@ class DatastoreBase(sched_sqlalchemy.SQLAlchemyJobStore):
             self.executions_table.c.scheduled_time.between(
                 start_time, end_time)).order_by(desc(self.executions_table.c.updated_time))
 
-        rows = self.engine.execute(selectable)
-
-        return_json = {
-            'executions': [self._build_execution(row) for row in rows]}
-
-        return return_json
+        with self.engine.connect() as conn:
+            rows = conn.execute(selectable)
+            return_json = {
+                'executions': [self._build_execution(row) for row in rows]}
+            return return_json
 
     def add_audit_log(self, job_id, job_name, event, **kwargs):
         """Insert an audit log.
@@ -175,7 +176,8 @@ class DatastoreBase(sched_sqlalchemy.SQLAlchemyJobStore):
         }
         audit_log.update(kwargs)
         log_insert = self.auditlogs_table.insert().values(**audit_log)
-        self.engine.execute(log_insert)
+        with self.engine.begin() as conn:
+            conn.execute(log_insert)
 
     def get_audit_logs(self, time_range_start, time_range_end):
         """Returns a list of audit logs.
@@ -202,12 +204,11 @@ class DatastoreBase(sched_sqlalchemy.SQLAlchemyJobStore):
             self.auditlogs_table.c.created_time.between(
                 start_time, end_time)).order_by(desc(self.auditlogs_table.c.created_time))
 
-        rows = self.engine.execute(selectable)
-
-        return_json = {
-            'logs': [self._build_audit_log(row) for row in rows]}
-
-        return return_json
+        with self.engine.connect() as conn:
+            rows = conn.execute(selectable)
+            return_json = {
+                'logs': [self._build_audit_log(row) for row in rows]}
+            return return_json
 
     def _build_audit_log(self, row):
         """Return audit_log from a row of scheduler_auditlog table.
