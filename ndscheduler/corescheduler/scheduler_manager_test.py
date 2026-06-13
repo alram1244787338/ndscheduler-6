@@ -94,9 +94,10 @@ class SchedulerManagerTest(tornado.testing.AsyncTestCase):
         job = self.scheduler.get_job(job_id)
         self.assertEqual(job.name, name)
 
+        datastore = self.scheduler.get_datastore()
         arguments = [job_class_string, job_id,
                      'ndscheduler.corescheduler.datastore.providers.sqlite.DatastoreSqlite',
-                     None, None]
+                     None, datastore.table_names]
         arguments += args
         self.assertEqual(list(job.args), arguments)
         self.assertEqual(str(job.trigger.fields[1]), month)

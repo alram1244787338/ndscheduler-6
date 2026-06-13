@@ -5,6 +5,11 @@ from ndscheduler.corescheduler.datastore import base
 
 class DatastoreMySQL(base.DatastoreBase):
 
+    # Required db_config keys for a MySQL connection. The actual checking
+    # lives in DatastoreBase.validate_config so every provider reports
+    # missing/invalid config the same way (declare keys, don't re-check).
+    REQUIRED_CONFIG_KEYS = ('user', 'password', 'hostname', 'port', 'database')
+
     def get_db_url(self):
         """Returns the db url to establish a MySQL connection, where db_config is passed in
         on initialization as:

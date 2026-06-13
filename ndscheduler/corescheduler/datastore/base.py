@@ -1,4 +1,20 @@
-"""Base class to represent datastore."""
+"""Base class to represent datastore.
+
+Responsibilities of this class (and *only* this class at the datastore
+layer):
+
+- Own the SQLAlchemy ``MetaData`` / engine / session for the job-store,
+  execution and audit-log tables.
+- Provide CRUD helpers for executions and audit logs.
+- Expose a ``validate_config`` hook that providers override to fail
+  early on bad connection dicts.
+
+Table-name resolution and provider loading live in
+``ndscheduler.corescheduler.datastore.factory`` — don't duplicate them
+here.
+"""
+
+import logging
 
 import dateutil.tz
 import dateutil.parser
@@ -8,14 +24,53 @@ from sqlalchemy import desc, select, MetaData
 from ndscheduler.corescheduler import constants
 from ndscheduler.corescheduler import utils
 from ndscheduler.corescheduler.datastore import tables
+from ndscheduler.corescheduler.exceptions import (
+    DatastoreConfigError,
+    DatastoreInitError,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _resolve_table_names(table_names):
+    """Fill in defaults for any missing table-name keys.
+
+    Kept local (rather than importing from factory) so that
+    ``DatastoreBase`` does not depend on the factory module at import
+    time — callers can still construct a datastore directly for tests.
+    """
+    defaults = {
+        'executions_tablename': constants.DEFAULT_EXECUTIONS_TABLENAME,
+        'jobs_tablename': constants.DEFAULT_JOBS_TABLENAME,
+        'auditlogs_tablename': constants.DEFAULT_AUDIT_LOGS_TABLENAME,
+    }
+    if not table_names:
+        return defaults
+    resolved = dict(defaults)
+    for key in ('executions_tablename', 'jobs_tablename', 'auditlogs_tablename'):
+        if key in table_names:
+            resolved[key] = table_names[key]
+    return resolved
 
 
 class DatastoreBase(sched_sqlalchemy.SQLAlchemyJobStore):
 
     instance = None
 
+    # Connection keys a provider requires in ``db_config``. An empty tuple
+    # means "no required keys" (e.g. sqlite). Subclasses override this single
+    # tuple instead of re-implementing ``validate_config`` -- so a new key
+    # can't be added to one provider and forgotten on the others.
+    REQUIRED_CONFIG_KEYS = ()
+
     @classmethod
     def get_instance(cls, db_config=None, table_names=None):
+        """Return the singleton instance for this provider, creating it
+        if necessary.
+
+        :param dict db_config: Provider-specific connection dict.
+        :param dict table_names: Optional table-name overrides.
+        """
         if not cls.instance:
             cls.instance = cls(db_config, table_names)
         return cls.instance
@@ -24,40 +79,92 @@ class DatastoreBase(sched_sqlalchemy.SQLAlchemyJobStore):
     def destroy_instance(cls):
         cls.instance = None
 
+    @classmethod
+    def validate_config(cls, db_config):
+        """Validate *db_config* before a connection is attempted.
+
+        The default implementation is driven by the provider's
+        ``REQUIRED_CONFIG_KEYS`` class attribute, so a new provider only has
+        to declare that tuple instead of re-implementing the same
+        dict / missing-key / port-type checks. This keeps the connection-
+        config rules in one place across sqlite / mysql / postgres.
+
+        Providers with extra, provider-specific rules (e.g. sqlite's optional
+        ``file_path``) may override this and call ``super().validate_config``
+        first.
+
+        :param dict db_config: provider connection settings to validate.
+        :raises DatastoreConfigError: with an actionable message naming the
+            offending key(s) and provider.
+        """
+        required = cls.REQUIRED_CONFIG_KEYS
+        if not required:
+            # Providers such as sqlite need no keys: accept None or a dict.
+            if db_config is not None and not isinstance(db_config, dict):
+                raise DatastoreConfigError(
+                    "%s: db_config must be a dict or None, got %s: %r"
+                    % (cls.__name__, type(db_config).__name__, db_config))
+            return
+
+        if not isinstance(db_config, dict):
+            raise DatastoreConfigError(
+                "%s: db_config must be a dict with keys %s, got %r"
+                % (cls.__name__, list(required), db_config))
+
+        missing = [key for key in required if key not in db_config]
+        if missing:
+            raise DatastoreConfigError(
+                "%s: db_config is missing required key(s): %s. Expected keys: %s"
+                % (cls.__name__, missing, list(required)))
+
+        if 'port' in required and not isinstance(db_config.get('port'), int):
+            raise DatastoreConfigError(
+                "%s: 'port' must be an int, got %r"
+                % (cls.__name__, db_config.get('port')))
+
     def __init__(self, db_config, table_names):
         """
         :param dict db_config: dictionary containing values for db connection
         :param dict table_names: dictionary containing the names for the jobs,
-        executions, or audit logs table, e.g. {
-            'executions_tablename': 'scheduler_executions',
-            'jobs_tablename': 'scheduler_jobs',
-            'auditlogs_tablename': 'scheduler_auditlogs'
-        }
-        If any of these keys is not provided, the default table name is selected from constants.py
+            executions, or audit logs table, e.g. {
+                'executions_tablename': 'scheduler_executions',
+                'jobs_tablename': 'scheduler_jobs',
+                'auditlogs_tablename': 'scheduler_auditlogs'
+            }
+            Missing keys are filled with defaults from ``constants``.
         """
         self.metadata = MetaData()
-        self.table_names = table_names
+        self.table_names = _resolve_table_names(table_names)
         self.db_config = db_config
 
-        executions_tablename = constants.DEFAULT_EXECUTIONS_TABLENAME
-        jobs_tablename = constants.DEFAULT_JOBS_TABLENAME
-        auditlogs_tablename = constants.DEFAULT_AUDIT_LOGS_TABLENAME
-        if table_names:
-            if 'executions_tablename' in table_names:
-                executions_tablename = table_names['executions_tablename']
-
-            if 'jobs_tablename' in table_names:
-                jobs_tablename = table_names['jobs_tablename']
-
-            if 'auditlogs_tablename' in table_names:
-                auditlogs_tablename = table_names['auditlogs_tablename']
+        executions_tablename = self.table_names['executions_tablename']
+        jobs_tablename = self.table_names['jobs_tablename']
+        auditlogs_tablename = self.table_names['auditlogs_tablename']
 
         self.executions_table = tables.get_execution_table(self.metadata, executions_tablename)
         self.auditlogs_table = tables.get_auditlogs_table(self.metadata, auditlogs_tablename)
 
-        super(DatastoreBase, self).__init__(url=self.get_db_url(), tablename=jobs_tablename)
+        try:
+            db_url = self.get_db_url()
+        except KeyError as exc:
+            raise DatastoreConfigError(
+                "%s.get_db_url() is missing a required db_config key: %s. "
+                "Check the DATABASE_CONFIG_DICT for this provider."
+                % (type(self).__name__, exc)
+            )
+        except Exception as exc:
+            raise DatastoreInitError(
+                "%s.get_db_url() failed: %s" % (type(self).__name__, exc)
+            )
 
-        self.metadata.create_all(self.engine)
+        try:
+            super(DatastoreBase, self).__init__(url=db_url, tablename=jobs_tablename)
+            self.metadata.create_all(self.engine)
+        except Exception as exc:
+            raise DatastoreInitError(
+                "Failed to initialise %s with url %r: %s"
+                % (type(self).__name__, db_url, exc)
+            )
 
     def get_db_url(self):
         """We can use the dict passed from db_config_dict to construct a db url.
@@ -79,7 +186,8 @@ class DatastoreBase(sched_sqlalchemy.SQLAlchemyJobStore):
         }
         execution.update(kwargs)
         execution_insert = self.executions_table.insert().values(**execution)
-        self.engine.execute(execution_insert)
+        with self.engine.begin() as conn:
+            conn.execute(execution_insert)
 
     def get_execution(self, execution_id):
         """Returns execution dict.
@@ -88,10 +196,10 @@ class DatastoreBase(sched_sqlalchemy.SQLAlchemyJobStore):
         :rtype: dict
         """
         selectable = select('*').where(self.executions_table.c.eid == execution_id)
-        rows = self.engine.execute(selectable)
-
-        for row in rows:
-            return self._build_execution(row)
+        with self.engine.connect() as conn:
+            rows = conn.execute(selectable)
+            for row in rows:
+                return self._build_execution(row)
 
     def update_execution(self, execution_id, **kwargs):
         """Update execution in database.
@@ -100,7 +208,8 @@ class DatastoreBase(sched_sqlalchemy.SQLAlchemyJobStore):
         """
         execution_update = self.executions_table.update().where(
             self.executions_table.c.eid == execution_id).values(**kwargs)
-        self.engine.execute(execution_update)
+        with self.engine.begin() as conn:
+            conn.execute(execution_update)
 
     def _build_execution(self, row):
         """Return job execution info from a row of scheduler_execution table.
@@ -155,10 +264,10 @@ class DatastoreBase(sched_sqlalchemy.SQLAlchemyJobStore):
             self.executions_table.c.scheduled_time.between(
                 start_time, end_time)).order_by(desc(self.executions_table.c.updated_time))
 
-        rows = self.engine.execute(selectable)
-
-        return_json = {
-            'executions': [self._build_execution(row) for row in rows]}
+        with self.engine.connect() as conn:
+            rows = conn.execute(selectable)
+            return_json = {
+                'executions': [self._build_execution(row) for row in rows]}
 
         return return_json
 
@@ -175,7 +284,8 @@ class DatastoreBase(sched_sqlalchemy.SQLAlchemyJobStore):
         }
         audit_log.update(kwargs)
         log_insert = self.auditlogs_table.insert().values(**audit_log)
-        self.engine.execute(log_insert)
+        with self.engine.begin() as conn:
+            conn.execute(log_insert)
 
     def get_audit_logs(self, time_range_start, time_range_end):
         """Returns a list of audit logs.
@@ -202,10 +312,10 @@ class DatastoreBase(sched_sqlalchemy.SQLAlchemyJobStore):
             self.auditlogs_table.c.created_time.between(
                 start_time, end_time)).order_by(desc(self.auditlogs_table.c.created_time))
 
-        rows = self.engine.execute(selectable)
-
-        return_json = {
-            'logs': [self._build_audit_log(row) for row in rows]}
+        with self.engine.connect() as conn:
+            rows = conn.execute(selectable)
+            return_json = {
+                'logs': [self._build_audit_log(row) for row in rows]}
 
         return return_json
 

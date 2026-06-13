@@ -1,10 +1,23 @@
-"""Represents the core scheduler instance that actually schedules jobs."""
+"""Represents the core scheduler instance that actually schedules jobs.
 
+``SchedulerManager`` is the top-level *orchestrator*: it knows **what**
+needs to be wired together (datastore, job stores, executors, job
+defaults) but delegates the **how** to the datastore factory and the
+underlying apscheduler classes.  Don't add low-level datastore or
+connection logic here — put it in ``datastore/factory.py`` or the
+relevant provider.
+"""
+
+import logging
 
 from apscheduler.executors import pool
 
 from ndscheduler.corescheduler import constants
 from ndscheduler.corescheduler import utils
+from ndscheduler.corescheduler.datastore import factory as datastore_factory
+from ndscheduler.corescheduler.exceptions import SchedulerConfigError
+
+logger = logging.getLogger(__name__)
 
 
 class SchedulerManager:
@@ -23,37 +36,116 @@ class SchedulerManager:
         :param str datastore_class_path: string path for datastore, e.g. 'datastore.SQLDatastore'
         :param dict db_config: dictionary containing values for db connection
         :param dict db_tablenames: dictionary containing the names for the jobs,
-        executions, or audit logs table, e.g. {
-            'executions_tablename': 'scheduler_executions',
-            'jobs_tablename': 'scheduler_jobs',
-            'auditlogs_tablename': 'scheduler_auditlogs'
-        }
-        If any of these keys is not provided, the default table name is selected from constants.py
+            executions, or audit logs table, e.g. {
+                'executions_tablename': 'scheduler_executions',
+                'jobs_tablename': 'scheduler_jobs',
+                'auditlogs_tablename': 'scheduler_auditlogs'
+            }
+            Missing keys fall back to defaults in ``constants``.
         :param bool job_coalesce: True by default
         :param int job_misfire_grace_sec: Integer number of seconds
         :param int job_max_instances: Int number of instances
         :param int thread_pool_size: Int thread pool size
         :param str timezone: str timezone to schedule jobs in, e.g. 'UTC'
         """
-        datastore = utils.get_datastore_instance(datastore_class_path, db_config, db_tablenames)
-        job_stores = {
-            'default': datastore
-        }
+        # -- input sanity checks -------------------------------------------
+        self._validate_inputs(
+            scheduler_class_path, datastore_class_path,
+            thread_pool_size, job_max_instances, job_misfire_grace_sec,
+            timezone,
+        )
 
-        job_default = {
+        # -- datastore (delegated to factory) ------------------------------
+        datastore = datastore_factory.create_datastore(
+            datastore_class_path, db_config, db_tablenames,
+        )
+
+        # -- apscheduler components ----------------------------------------
+        job_stores = self._build_job_stores(datastore)
+        executors = self._build_executors(thread_pool_size)
+        job_defaults = self._build_job_defaults(
+            job_coalesce, job_misfire_grace_sec, job_max_instances,
+        )
+
+        # -- instantiate the scheduler -------------------------------------
+        scheduler_class = utils.import_from_path(scheduler_class_path)
+        self.sched = scheduler_class(
+            datastore_class_path,
+            jobstores=job_stores,
+            executors=executors,
+            job_defaults=job_defaults,
+            timezone=timezone,
+        )
+
+    # ------------------------------------------------------------------
+    # Builder helpers — split out so defaults and injected values are
+    # obvious at a glance, and so subclasses can override individual
+    # pieces without reimplementing the whole __init__.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_job_stores(datastore):
+        """Return the jobstores dict consumed by apscheduler.
+
+        Currently just a single ``'default'`` store backed by the given
+        datastore; extracted so that future stores (e.g. a read-only
+        mirror) can be added here.
+        """
+        return {'default': datastore}
+
+    @staticmethod
+    def _build_executors(thread_pool_size):
+        """Return the executors dict consumed by apscheduler."""
+        return {'default': pool.ThreadPoolExecutor(thread_pool_size)}
+
+    @staticmethod
+    def _build_job_defaults(job_coalesce, job_misfire_grace_sec, job_max_instances):
+        """Return the job_defaults dict consumed by apscheduler.
+
+        Values come from constructor arguments (which themselves default
+        to ``constants.DEFAULT_*``), so callers can see what's being
+        applied without having to read apscheduler docs.
+        """
+        return {
             'coalesce': job_coalesce,
             'misfire_grace_time': job_misfire_grace_sec,
-            'max_instances': job_max_instances
+            'max_instances': job_max_instances,
         }
 
-        executors = {
-            'default': pool.ThreadPoolExecutor(thread_pool_size)
-        }
-
-        scheduler_class = utils.import_from_path(scheduler_class_path)
-        self.sched = scheduler_class(datastore_class_path, jobstores=job_stores,
-                                     executors=executors, job_defaults=job_default,
-                                     timezone=timezone)
+    @staticmethod
+    def _validate_inputs(scheduler_class_path, datastore_class_path,
+                         thread_pool_size, job_max_instances,
+                         job_misfire_grace_sec, timezone):
+        """Fail fast on obviously bad constructor arguments."""
+        if not scheduler_class_path or not isinstance(scheduler_class_path, str):
+            raise SchedulerConfigError(
+                "scheduler_class_path must be a non-empty dotted-path "
+                "string, got %r" % (scheduler_class_path,)
+            )
+        if not datastore_class_path or not isinstance(datastore_class_path, str):
+            raise SchedulerConfigError(
+                "datastore_class_path must be a non-empty dotted-path "
+                "string, got %r" % (datastore_class_path,)
+            )
+        if not isinstance(thread_pool_size, int) or thread_pool_size < 1:
+            raise SchedulerConfigError(
+                "thread_pool_size must be a positive int, got %r"
+                % (thread_pool_size,)
+            )
+        if not isinstance(job_max_instances, int) or job_max_instances < 1:
+            raise SchedulerConfigError(
+                "job_max_instances must be a positive int, got %r"
+                % (job_max_instances,)
+            )
+        if not isinstance(job_misfire_grace_sec, int) or job_misfire_grace_sec < 0:
+            raise SchedulerConfigError(
+                "job_misfire_grace_sec must be a non-negative int, got %r"
+                % (job_misfire_grace_sec,)
+            )
+        if not timezone or not isinstance(timezone, str):
+            raise SchedulerConfigError(
+                "timezone must be a non-empty string, got %r" % (timezone,)
+            )
 
     def get_datastore(self):
         return self.sched._lookup_jobstore('default')

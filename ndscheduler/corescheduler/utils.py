@@ -103,5 +103,19 @@ def get_pid():
 
 
 def get_datastore_instance(datastore_class_path, db_config=None, db_tablenames=None):
-    datastore_class = import_from_path(datastore_class_path)
-    return datastore_class.get_instance(db_config, db_tablenames)
+    """Return a (cached singleton) datastore for the given provider path.
+
+    This delegates to :func:`datastore.factory.create_datastore` so that
+    table-name resolution and config validation happen in exactly one
+    place.  The import is done lazily to avoid a circular dependency
+    between ``utils`` and ``factory``.
+
+    New code that builds a scheduler should call
+    :func:`datastore.factory.create_datastore` directly instead.
+    """
+    # Local import: factory already imports utils at module level;
+    # importing it here at module level would create a cycle.
+    from ndscheduler.corescheduler.datastore import factory as datastore_factory
+    return datastore_factory.create_datastore(
+        datastore_class_path, db_config, db_tablenames,
+    )

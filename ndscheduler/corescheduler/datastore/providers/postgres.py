@@ -5,6 +5,12 @@ from ndscheduler.corescheduler.datastore import base
 
 class DatastorePostgres(base.DatastoreBase):
 
+    # Required db_config keys for a Postgres connection. The actual checking
+    # lives in DatastoreBase.validate_config so every provider reports
+    # missing/invalid config the same way (declare keys, don't re-check).
+    REQUIRED_CONFIG_KEYS = (
+        'user', 'password', 'hostname', 'port', 'database', 'sslmode')
+
     def get_db_url(self):
         """Returns the db url to establish a Postgres connection, where db_config is passed in
         on initialization as:
